@@ -1,0 +1,818 @@
+#include <iostream> // cout
+#include <fstream>  // ifstream (Input file stream), ofstream, fstream
+#include <iomanip>  // setw, setprecision, showpos, noshowpos
+#include <cmath>    // fabs
+
+#include "menu_dong.h"
+
+// Nếu số có trị tuyện đối nhỏ hơn 1e-10 thì có thể coi là 0
+#define ISZERO(x) (fabs((x)) < 1e-10)
+#define o cout<<"--------------------------------------------------------------------------" << endl
+#define X first
+#define Y second
+
+using namespace std;
+void Gauss();
+void Cholesky(void);
+void GaussJordan(void);
+void partially_pivot(double **, int, int);
+void multiplyMatrix();
+void swapMatrix();
+void LUdecomposition();
+void CalculateEqua1();
+void Gauss_Jordan();
+
+// GaussJordan_2
+double t[10000], ptg; // tập ẩn biểu diễn theo
+int check[20], checkvn[20];  //kiem tra hang cot phan tu gia da co hay chua
+pair <int, int> ptg_index; //luu vi tri phan tu gia
+// Thắc mắc về a[i][0]
+int w;
+int m, n;
+double **a,**b, **c, **d, **e; //**e là khởi tạo ma trận chuyển vị của A
+double **l; //Sử dụng trong việc phân tách A thành dạng LU  
+double **y,**x;
+double sigma = 0;
+int dem = 0, dem1 =0; //dem dùng để xem đối xứng ko, dem1 dùng để đếm có hiệu nào âm để kết thúc Cholesky
+// double discriminant;
+FILE *f;
+const char *checkfile;  // Lưu lại tên file input để kiểm tra sau khi giải xong
+
+// Tải ma trận từ file
+void loadMatrix(const char *pathtofile) {
+    ifstream fi(pathtofile);
+    checkfile = pathtofile;
+    fi >> m >> n;
+    a = new double *[m + 1]; // Cấp phát động m + 1 con trỏ
+    b = new double *[m + 1];
+    c = new double *[m + 1];
+    d = new double *[m + 1];
+    e = new double *[m + 1];
+    l = new double *[m + 1];
+    y = new double *[m + 1];
+    x = new double *[m + 1];
+// Ma trận A dùng để lưu ma trận bổ sung A|b. Cột 0 của ma trận a sẽ lưu số số 0 ở đầu mỗi hàng
+    for (int i = 0; i <= m; i++) 
+        a[i] = new double[n + 2](); //Mỗi con trỏ vừa cấp lại cấp n+2 vị trí 
+    for (int i = 0; i <= m; i++) 
+        b[i] = new double[n + 2]();
+    for (int i = 0; i <= m; i++) 
+        c[i] = new double[n + 2]();
+    for (int i = 0; i <= m; i++)
+        d[i] = new double[n+2]();
+    for (int i = 0; i <= m; i++)
+        e[i] = new double[n+2]();
+    for (int i = 0; i <= m; i++)
+        l[i] = new double[n+2]();
+    for (int i = 0; i <= m; i++) 
+        y[i] = new double[n + 2]();
+    for (int i = 0; i <= m; i++) 
+        x[i] = new double[n + 2]();
+    for (int i = 1; i <= m; i++) 
+        for (int j = 1; j <= n + 1; j++) 
+            fi >> a[i][j];
+    fi.close();
+}
+
+// int step = 0;
+// In ma trận ra màn hình
+void inmatran(int precision = w) {
+    for (int i = 1; i <= m; i++) {
+        //cout << (int)a[i][0] << " : "; // a[i][0] dùng để lưu số số 0 đầu tiên ở hàng i
+        for (int j = 1; j <= n + 1; j++) {
+            cout << setw(precision + 5) << left << setprecision(precision) << fixed << a[i][j] << "  ";
+            fprintf(f, "%*.*lf ", precision + 5, precision, a[i][j]);
+        }
+        cout << endl;
+        fprintf(f,"\n");
+    }
+    // cout << endl << a[0][0];
+    o;
+    fprintf(f, "\n--------------------------------------------------------------------------\n");
+}
+
+// Đảo 2 hàng i,j (i,j khác nhau)
+void daohang(int i, int j) {
+    if (i != j) swap(a[i], a[j]);
+}
+
+// Đếm số số 0 đầu ở mỗi hàng từ hàng i trở xuống
+void countzeros(int i = 1) {
+    for (int k = i; k <= m; k++) {
+        int s = 1;
+        a[k][0] = 0; // Số số 0 được lưu ở cột đầu tiên của mảng a
+        while (ISZERO(a[k][s]) && s <= n) 
+            a[k][0] = s++; // Đếm
+    }
+}
+
+// Sắp xếp lại thứ tự các hàng từ hàng i theo tăng dần số số 0 ở đầu bằng sắp xếp lựa chọn
+void sapxeplaihang(int i = 1) {
+    int MIN;
+    countzeros(i); // Cập nhật lại số số 0
+    for (int z = i; z < m; z++) {
+        MIN = z;
+        for (int k = z + 1; k <= m; k++) 
+            if (a[k][0] < a[MIN][0]) 
+                MIN = k;
+        daohang(MIN, z);
+    }
+}
+
+// Biến đổi về ma trận bậc thang
+void matranbacthang() {
+    int i = 1, j = 1;
+    // Đi tìm phần tử khác 0 đầu tiên (đi từ trên xuống dưới, trái sang phải)
+    while (ISZERO(a[i][j])) {
+        i++;
+        if (i == m + 1) {
+            i = 1; j++;
+            if (j == n + 2) {
+                countzeros();
+                return;
+            } // Duyệt đến phần tử cuối cùng mà vẫn chưa thấy thì ma trận A là ma trận 0
+        }
+    }
+    cout << "Vi tri dau tien khac 0: " << i << " " << j << endl;
+    fprintf(f,"Vi tri dau tien khac 0: %d %d\n",i,j);
+    if (i != 1) daohang(i, 1);
+
+    // Bắt đầu lặp từ cột thứ j vừa tìm được ở trên đến n
+    for (; j <= n + 1; j++) {
+        for (i = 2; i <= m; i++) {
+            // Nếu a[i][j] khác 0 ta bắt đầu khử
+            if (!ISZERO(a[i][j])) {
+                int k; // Tìm hàng k để a[k][j] khác 0 và a[k][l] = 0 với mọi l<j
+                bool flag = false;
+                for (k = i - 1; k >= 1; k--) { // Tìm từ hàng i-1 trở lên 
+                    if (!ISZERO(a[k][j]) && a[k][0] == j - 1) {
+                        flag = true; // Đã có hàng k thỏa mãn
+                        break;
+                    }
+                }
+                if (!flag) continue; //Nếu không tìm thấy k ta tiếp tục tăng i
+
+                // Lấy hàng i trừ đi aij/akj lần hàng k và gán cho hàng i
+                double ratio = a[i][j] / a[k][j];
+                for (int z = j; z <= n + 1; z++) a[i][z] = a[i][z] - ratio * a[k][z];
+                // cout << "Step " << i + j - 2 << endl; 
+                // fprintf(f, "Step %d\n", i + j - 2);
+                
+                inmatran(); // Bỏ comment để in ma trận sau mỗi lần khử 1 vị trí
+              
+            }
+             countzeros(); 
+        }
+    // Có thể không cần thiết sắp xếp lại, ta đảo hàng trong lúc khử, hiện tại chưa biết cách làm như thế
+        sapxeplaihang();
+    }
+}
+
+void dinhthucmatran()
+{
+    matranbacthang();
+    double discriminant = 1;
+    if ( m != n)
+    {
+        cout << "Ma tran khong phai ma tran vuong nen khong co dinh thuc" << "\n";
+    }
+    else 
+    {
+       
+        for (int i = 1; i <= m ; i++)
+        {
+            for (int j = 1; j <= n; j++)
+            {
+                if (i == j)
+                {
+                    discriminant *= a[i][j];
+                }
+            }
+        }
+        
+        cout << "Dinh thuc cua ma tran la: " << setprecision(w) << fixed << discriminant << "\n";
+        fprintf(f, "Dinh thuc cua ma tran la: %.*f\n",w,discriminant);
+    }
+}
+// Xác định hệ có nghiệm duy nhất, vô số nghiệm hay vô nghiệm
+int xacdinhloainghiem() {
+    int rankA = m, rankAn = m; // rank A va rank A ngang
+    for (int i = m; i >= 1; i--) {
+        if (a[i][0] == n) {    // Số số 0 ở hàng i == n tức là hàng full 0
+            rankA--;
+            if (ISZERO(a[i][n + 1])) rankAn--; // Giá trị ở cột bổ sung
+        }
+        else break;
+    }
+
+    if (rankA == rankAn && rankA < n)  return rankA; // Vô số nghiệm
+    if (rankA == rankAn && rankA == n) return -1;    // Nghiệm duy nhất
+    return -2; // Vô nghiệm
+}
+
+// Kiểm tra nghiệm trong trường hợp hệ có nghiệm duy nhất
+bool kiemtra(double *x, int offset = 0, bool param = false) {
+    ifstream fi(checkfile);
+    fi >> m >> n;
+
+    for (int i = 0; i < m; i++) {
+        double tmp = 0.0, aij = 0.0;
+        for (int j = 0; j < n; j++) {
+            fi >> aij;
+            tmp += aij * x[j + 1 + offset];
+        }
+        fi >> aij;
+        if ((param && !ISZERO(tmp)) || (!param && fabs(tmp - aij) > 1e-6)) return false;
+    }
+    fi.close();
+    return true;
+}
+
+// Giải nghiệm trong trường hợp có nghiệm duy nhất
+void giainghiemduynhat() {
+    double *x = new double[n + 1]();
+    for (int i = n; i >= 1; i--) {
+        x[i] = a[i][n + 1];
+        for (int j = n; j > i; j--) x[i] -= x[j] * a[i][j];
+        x[i] /= a[i][i];
+    }
+
+    cout << "He co nghiem duy nhat" << endl;
+    fprintf(f, "He co nghiem duy nhat\n" );
+    for (int i = 1; i <= n; i++) {
+        cout << "x_" << i << " = " << setprecision(w) << fixed << x[i] << endl;
+        fprintf(f, "x_%d = %.*f\n", i, w, x[i]);
+    }
+    if (kiemtra(x)) cout << endl << "---> True" << endl;
+    else            cout << endl << "---> False" << endl;
+};
+
+// Giải nghiệm trong trường hợp vô số nghiệm
+void giainghiemtongquat(int rankA) {
+    double **x;
+
+    // Tạo một ma trận lưu nghiệm 
+    x = new double *[n+1];
+    for (int i = 0; i <= n; i++) x[i] = new double[n]();
+    for (int i = 0; i < n; i++)  x[i + 1][i] = 1;
+    cout << "Rank A: " << rankA << endl;
+
+    // Biểu diễn ẩn này qua ẩn khác (x1 = 0 -2x2 - 3x3 - 3.5x4)
+    int i = rankA;
+    while (i >= 1) {
+        int j = a[i][0], k = 0;
+        double aij = a[i][j + 1];
+        for (int z = 0; z <= n; z++) x[z][j] = 0;
+        x[0][j] = a[i][n + 1] / aij;
+        while (++k <= n) if (k != j + 1) x[k][j] = -a[i][k] / aij;
+        i--;
+    }
+
+    // Thế ẩn này vào ẩn kia vì xi biểu diễn qua các xj với j > i nên sẽ mất dần các tham số
+    for (int i = 0; i < n; i++)
+        for (int j = i + 2; j <= n; j++) // Ví dụ thế các xj khác vào x2 thì j > 2
+            if (!ISZERO(x[j][i])) {
+                double tmp = x[j][i]; // hệ số của xj trong biểu diễn xi từ bước trên (xi = ... -2xj + ... thì tmp = -2)
+                for (int z = 0; z <= n; z++) x[z][i] = x[z][i] + tmp * x[z][j - 1]; // Thế xj vào xi
+                x[j][i] = x[j][i] - tmp; // Phải trừ đi vì xi = bi + ai*xi + ...,\
+                nếu ai = 1 (xi được chọn làm tham số) thì sau vòng lặp for trên xij = ai + tmp,\
+                nếu ai = 0 (xi được biểu diễn qua ẩn khác) thì sau vòng for xij = tmp,\
+                cả 2 trường hợp đều cần trừ đi tmp để đúng với hệ số
+            }
+
+    // In nghiệm
+    for (int i = 0; i < n; i++) {
+        cout << "x_" << i + 1 << " = " << x[0][i];
+        for (int j = 1; j <= n; j++) if (!ISZERO(x[j][i]))
+                cout << " " << showpos << x[j][i] << noshowpos << "x_" << j;
+        cout << endl;
+    }
+
+    // Kiểm tra lại nghiệm
+    for (int i = 0; i <= n; i++) {
+        if (!kiemtra(x[i], -1, i)) {
+            cout << endl << "---> False" << endl;
+            break;
+        }
+        else if (i==n) cout << endl << "---> True" << endl;
+    }
+}
+
+// Phương pháp Gauss giải hệ phương trình
+void Gauss() {
+    matranbacthang();
+    // inmatran();
+    // dinhthucmatran();
+    int r = xacdinhloainghiem();
+    if (r == -2) 
+        {
+            cout << "No Solution" << endl;
+            fprintf(f,"No Solution\n");
+        }
+    else if (r == -1)    giainghiemduynhat();
+    else                 giainghiemtongquat(r);
+}
+
+int menu(str thaotac[5],int n)
+{
+    int tt = 0; //Biến chỉ ra đang ở thao tác nào, hiện tại tt bằng 0 chỉ thao tác thứ nhất
+    //Dùng vòng while vô hạn đến khi trả về giá trị của hàm thì dừng
+    while (1)
+    {
+        //Ở trên này cần in ra màn hình giao diện của menu trước
+        clrscr();
+        for (int i = 0; i < n; i++)
+        {
+            // TextColor(mau[i]); // Hàm này là đổi màu cho chữ chuẩn bị được in ra màn hình
+            if (i == tt) {
+                changeStyle(BG_CYAN, FG_YELLOW);
+                cout << i+1 << ") " << thaotac[i] << endl;
+                resetText();
+            }
+            else {
+                cout << i+1 << ") " << thaotac[i] << endl;
+            }
+        }
+        int z = getch();
+        TRANGTHAI trangthai = key(z);
+        switch (trangthai)
+        {
+        case UP:
+        {
+            if (tt == 0)
+            {
+                tt = n-1;
+            }
+            else
+                tt--;
+            break;
+        }
+        case DOWN:
+        {
+            if (tt == n - 1)
+                tt = 0;
+            else
+                tt++;
+            break;
+        }
+        case ENTER:
+        {
+            switch (tt)
+            {
+            case 0:
+                Gauss();
+                break;
+            case 1:
+                Gauss_Jordan();
+                break;
+            case 2:
+                Cholesky();
+                break;
+            case 3:
+                dinhthucmatran();
+                break;
+            case 4:
+                return -1;
+            }
+            system("pause");
+        }
+        }
+    }
+    return tt;
+}
+
+void phantugiai(){
+    ptg = 0;
+    for(int i = 1; i <= m; i++){
+        if(check[i] != 0) continue;  // hang nay da co phan tu giai
+        for(int j = 1; j <= n; j++){
+            if(fabs(a[i][j]) == 1){
+                ptg = 1;
+                ptg_index.X = i;
+                ptg_index.Y = j;
+                break;
+            }
+            if(fabs(a[i][j]) > ptg){
+                ptg_index.X = i;
+                ptg_index.Y = j;
+                ptg = fabs(a[i][j]);
+            }
+        }
+        if(ptg == 1) break;
+    }
+    check[ptg_index.X] = ptg_index.Y;
+}
+
+void biendoimatran(){
+    int p = ptg_index.X, q = ptg_index.Y;
+    for(int i = 1; i <= m; i++){
+        if(i == p) continue;
+        double ai = a[i][q]/a[p][q];
+        for(int j = 1; j <= n + 1; j++){
+            a[i][j] = a[i][j] - a[p][j]*ai;
+        }
+    }
+}
+
+void chuanhoaheso(){
+    if(ptg != 1){
+        for(int j = 1; j <= n + 1; j++){
+            a[ptg_index.X][j] = a[ptg_index.X][j]/ptg;
+        }
+        ptg = 1;
+    }
+}
+
+void xuatnghiem(){
+    o;
+    fprintf(f,"\n--------------------------------------------------------------------------");
+    cout << "\nNghiem cua bai toan theo phuong phap Gauss Jordan la: ";
+    fprintf(f,"\nNghiem cua bai toan theo phuong phap Gauss Jordan la: ");
+    for(int j = 1; j <= n; j++){
+        for(int i = 1; i <= m; i++){
+            if(a[i][j] && check[i] != j){
+                cout << "\nx" << j << " = " << "t" << j;
+                fprintf(f,"x%d = t%d",j,j);
+                break;
+            }
+            if(a[i][j] && check[i] == j){
+                cout << "\nx" << j << " = " << setprecision(w) << fixed << a[i][n+1]/a[i][j] ; // để ý rằng nếu vô nghiệm hoặc vsn thì xóa "\n"
+                fprintf(f,"\nx%d = %.*f",j,w,a[i][n+1]/a[i][j]);
+                for(int k = 1; k <= n; k++){
+                    if(check[i] != k){
+                        if(a[i][k]) 
+                        {
+                            cout << " + " << -a[i][k]/a[i][j] << "t" << k;
+                            fprintf(f," + %.*ft%d",w, -a[i][k]/a[i][j],k);
+                        }
+                    }
+                }
+            }	
+        }
+        // cout << endl;
+    }
+    cout << "\n";
+    o;	
+    fprintf(f,"\n--------------------------------------------------------------------------");
+}
+
+void checkVonghiem(){
+    int i = m;
+    while(i >= 1){
+        for(int j = 1; j <= n + 1; j++){
+            if(a[i][j] != 0){
+                checkvn[i] = j;
+                break;
+            }
+        }
+        if(checkvn[i] == n + 1){
+            o;
+            fprintf(f,"\n--------------------------------------------------------------------------");
+            cout << "\nNo solution" << endl;
+            fprintf(f,"\nNo solution\n");
+            o;
+            fprintf(f,"\n--------------------------------------------------------------------------");
+            // exit(0);
+            return;
+        }
+        i--;
+    }
+    xuatnghiem();
+}
+
+// Phương pháp Gauss Jordan giải hệ PT 
+void Gauss_Jordan(){
+    inmatran();
+    for(int i = 1; i <= min(m, n); i++){
+        phantugiai();
+        if(ptg == 0) continue;
+        chuanhoaheso();
+        biendoimatran();
+        inmatran();
+    }
+    inmatran();
+    checkVonghiem();
+}
+
+
+// Chương trình sử dụng phương pháp Cholesky
+void CheckSymmetricMatrix()
+{
+    for (int i = 1; i <= m ;i++)
+    {
+        for (int j = 1; j <= n; j ++)
+        {
+            if (a[i][j] != a[j][i])
+            {
+                dem++;
+            }
+        }
+    }
+    if (dem == 0)
+    {
+        cout << "\nBuoc 1: Ma tran A la ma tran doi xung\n";
+        o;
+        fprintf(f,"\nBuoc 1: Ma tran A la ma tran doi xung\n");
+        fprintf(f,"\n--------------------------------------------------------------------------");
+    }
+    else
+    {
+        cout << "\nBuoc 1: Ma tran A khong la ma tran doi xung\n";
+        fprintf(f,"\nBuoc 1: Ma tran A khong la ma tran doi xung\n");
+        cout << "\nKhi do, ta se lay A^tA de tao ra ma tran doi xung\n";
+        fprintf(f,"\nKhi do, ta se lay A^tA de tao ra ma tran doi xung\n");
+        cout << "\nTa dua ve ma tran Cx = D voi C = A^tA, D = A^tb\n";
+        fprintf(f,"\nTa dua ve ma tran Cx = D voi C = A^tA, D = A^tb\n");
+        o;
+        fprintf(f,"\n--------------------------------------------------------------------------");
+    }
+}
+void swapMatrix()
+{
+    // double b[10][10];
+    for (int i = 1; i<=n; i++)
+    {
+        for (int j = 1; j <= n; j++)
+        {
+            e[i][j] = a[j][i];
+            // cout << e[i][j] << " ";
+        }
+    }
+}
+
+void multiplyMatrix()
+{
+    if (dem == 0)
+    {
+        swapMatrix();
+        for (int i = 1; i <= n; i++)
+        {
+            for (int j = 1; j<=n;j++)
+            {
+                for (int k = 1; k <= n; k++)
+                {
+                    c[i][j] = a[i][j];
+                }
+            }
+        // cout << "\n";
+        }
+        for (int i = 1; i<=n; i++)
+        {
+            for (int k =1; k <= n; k++)
+            {
+                d[i][n+1] = b[i][n+1];
+            }
+        // cout << d[i][n+1] << "\n";
+        }
+    }
+
+    if (dem != 0) {
+    swapMatrix();
+    for (int i = 1; i <= n; i++)
+    {
+        for (int j = 1; j<=n;j++)
+        {
+            for (int k = 1; k <= n; k++)
+            {
+                c[i][j] = c[i][j] + e[i][k] * a[k][j];
+            }
+            // cout << c[i][j] << " ";
+        }
+        // cout << "\n";
+    }
+    for (int i = 1; i<=n; i++)
+    {
+        for (int k =1; k <= n; k++)
+            {
+                d[i][n+1] = d[i][n+1] + e[i][k] * a[k][n+1];
+            }
+        // cout << d[i][n+1] << "\n";
+    }
+    }
+    // cout << "\n";
+}
+
+
+// Phân tách LU của ma trận A^tAx = A^tb <-> Cx = D
+void LUdecomposition()
+{
+    // cout << dem;
+    multiplyMatrix();
+    l[1][1] = (double) sqrt(c[1][1]);
+    // cout << l[1][1];
+    
+    for (int j = 2; j <= n; j++)
+    {
+        l[1][j] = (double) c[1][j]/l[1][1];
+        // cout << l[1][j] << "\n\n";
+    }
+    for (int i = 2; i <= n; i++)
+    {
+        double sigma = 0;  // ?
+        for (int k = 1; k <= i-1; k++)
+        {
+            sigma = sigma + l[k][i]*l[k][i];
+        }
+        // cout << c[i][i] - sigma << "\n";
+        if (c[i][i]-sigma <= 0)
+            {
+                dem1++;
+                return;
+                // cout << dem1 << "\n\n";
+            }
+        l[i][i] = (double) sqrt(c[i][i]-sigma);
+        for (int j =1; j <= n; j++)
+        {
+            if (i < j)
+            {
+                double count = 0;
+                for (int k = 1; k <= i-1 ; k++)
+                    {
+                        count = count + l[k][i]*l[k][j];
+                    }
+                l[i][j] = (double) (c[i][j]-count)/l[i][i];
+            }
+            else if (i > j)
+            {
+                l[i][j] = 0;
+            }
+        }
+    }
+    cout << "\nBuoc 2: Phan tach ma tran duoi dang S^t.S, ma tran S la: \n";
+    fprintf(f,"\nBuoc 2: Phan tach ma tran duoi dang S^t.S, ma tran S la: \n");
+    for (int i = 1; i <= n ; i++)
+    {
+        for (int j = 1; j <= n; j++)
+        {
+            cout << setprecision(w) << fixed << l[i][j] << " ";
+            fprintf(f,"%.*f ",w, l[i][j]);
+        }
+        cout << "\n";
+        fprintf(f,"\n");
+    }
+}
+
+// Giải pt LY = B
+void CalculateEqua1()
+{
+    y[1][n+1] = (double) d[1][n+1]/l[1][1];
+    for (int i =2 ; i<= n ; i ++)
+    {
+        double sum1 = 0;
+        for (int k = 1; k <= i-1; k++)
+        {
+            sum1 = sum1 + l[k][i]*y[k][n+1];
+        }
+        y[i][n+1] = (double) (d[i][n+1]-sum1)/l[i][i];
+    }
+    o;
+    cout << "\nBuoc 3: nghiem Y cua he theo phuong phap Cholesky: \n";
+    fprintf(f,"\n--------------------------------------------------------------------------");
+    fprintf(f,"\nBuoc 3: nghiem Y cua he theo phuong phap Cholesky: \n");
+    for (int i = 1; i <= n ;i++)
+    {
+        cout << "y" << i << " = " << setprecision(w) << fixed << y[i][n+1] << "\n";
+        fprintf(f, "y%d = %.*f\n",i,w,y[i][n+1]);
+    }
+    cout << "\n";
+}
+
+void CalculateEqua2()
+{
+    x[n][n+1] = (double) (y[n][n+1])/l[n][n];
+    for (int i = n-1; i >=1; i--)
+    {
+        double sum2 = 0;
+        for (int k = i+1; k <= n; k++)
+        {
+            sum2 = sum2 + l[i][k] * x[k][n+1];
+        }
+        x[i][n+1] = (double) (y[i][n+1] - sum2)/(l[i][i]);
+    }
+    o;
+    cout << "Buoc 4: nghiem cua Phuong trinh ban dau theo phuong phap Cholesky la: \n";
+    fprintf(f,"\n--------------------------------------------------------------------------");
+    fprintf(f,"\nBuoc 4: nghiem cua Phuong trinh ban dau theo phuong phap Cholesky la: \n");
+    for (int i = 1; i <= n ; i++)
+    {
+        cout << "x" << i << " = " << setw(w+3) << setprecision(w) << fixed << x[i][n+1] << "\n";
+        fprintf(f,"x%d = %*.*f\n",i,w+3, w, x[i][n+1]);
+    }
+}
+// Phương pháp Cholesky tìm nghiệm hệ phương trình
+void Cholesky(void)
+{
+    // LUdecomposition();
+    if (m == n)
+    {
+        CheckSymmetricMatrix();
+        LUdecomposition();
+        // cout << dem1 << "\n"; 
+        if (dem1 == 0) {
+            CalculateEqua1();
+            CalculateEqua2(); // SX=Y  S^tY=B
+            return;
+        }
+    }
+    cout << "\nKhong ap dung duoc phuong phap Cholesky de tim nghiem";
+    fprintf(f,"\nKhong ap dung duoc phuong phap Cholesky de tim nghiem");
+}
+
+int main() {
+    int run = 0;
+    cout << "Nhap so chu so lam tron: ";
+    cin >> w;
+    loadMatrix("d://C,C++ VSCODE/Final_KTLT/MaTran1.txt");
+    f = fopen("d://C,C++ VSCODE/Final_KTLT/output.txt", "w+t");
+    while (run != -1)
+        run = menu(thaotac, 5);
+    fclose(f);
+    return 0;
+}
+
+
+
+/* 
+4 4
+5 3 2 1 1
+3 6 1 2 4
+2 1 5 1 7 
+1 2 1 6 2
+3 3
+24.21 2.42 3.85 30.24
+2.31 31.49 1.52 40.95
+3.49 4.85 28.72 42.81
+4 4 
+4.9 1.0 0.1 1.1 5.0
+1.0 6.4 1.2 0.2 2.2
+0.1 1.2 3.6 1.1 3.7
+1.1 0.2 1.1 6.4 2.2
+test case 1
+4 6 
+1 2 3 4 5 7 7
+2 4 6 1 -2 3 3
+3 6 7 4 -8 6 6
+4 8 10 1 -15 2 2
+test case 2
+3 3
+1 1 1 3
+2 -1 2 -3
+1 -3 -3 -5
+test case 3
+4 6 
+0 2 3 4 5 7 7
+0 4 6 1 -2 3 3
+3 6 7 4 -8 6 6
+4 8 10 1 -15 2 2
+3 3
+0 1 2 4
+1 -3 -1 5
+-2 4 -5 7
+3 3
+1 2 5 3
+2 4 -4 7 
+5 -4 7 8
+3 3
+1 1 0 3
+2 1 3 5
+3 1 1 6
+Vô số nghiệm
+3 3
+0 1 2 5
+0 2 4 10
+-5 -6 7 3
+Vô nghiẹm
+3 3
+0 1 2 5
+0 2 4 13
+-5 -6 7 3
+
+0 1 2 5
+2 3 4 13
+-5 -6 7 3
+
+5 5
+1 3 -2 0 -2 0.5
+3 4 -5 1 -3 5.4
+-2 -5 3 -2 2 5.0
+0 1 -2 5 3 7.5
+-2 -3 2 3 4 3.3
+3 3
+4 12 -16 7
+12 37 -43 5
+-16 -43 98 10
+3 3 
+1 2 3 31
+4 5 6 41
+7 8 9 51
+4 4
+1 1 -2 1 1
+1 -3 1 1 0 
+4 -1 -1 -1 1
+4 3 -4 -1 2
+4 4
+1 1 1 1 4
+1 2 3 4 10
+2 3 4 0 9
+7 1 2 3 13
+*/
